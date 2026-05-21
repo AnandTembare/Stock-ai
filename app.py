@@ -1,6 +1,6 @@
 # ============================================================
-# Indian Stock Market Analyser — Premium Dark Edition
-# Streamlit App | Live NSE/BSE data via yfinance
+# Indian Market Analyser Pro — Enterprise Edition V6
+# Features: Universal Search, ML Prediction, SIP Wealth Builder
 # ============================================================
 
 import warnings
@@ -15,316 +15,341 @@ import yfinance as yf
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score
+import time
 
-# ── Page config ──────────────────────────────────────────────
+# ── 1. Core App Configuration ─────────────────────────────────
 st.set_page_config(
-    page_title="Indian Market Analyser",
-    page_icon="📈",
+    page_title="Market AI Pro",
+    page_icon="⚡",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
-# ── Constants ─────────────────────────────────────────────────
-NSE_STOCKS = {
-    "Reliance Industries": "RELIANCE.NS", "TCS": "TCS.NS", "HDFC Bank": "HDFCBANK.NS",
-    "Infosys": "INFY.NS", "ICICI Bank": "ICICIBANK.NS", "SBI": "SBIN.NS",
-    "Bharti Airtel": "BHARTIARTL.NS", "ITC": "ITC.NS", "L&T": "LT.NS",
-    "Bajaj Finance": "BAJFINANCE.NS", "Maruti Suzuki": "MARUTI.NS", "Tata Motors": "TATAMOTORS.NS",
-}
-
-INDICES = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Nifty Bank": "^NSEBANK"}
-
-# ── CSS Styling (Premium Dark Mode) ───────────────────────────
-def inject_custom_css():
+# ── 2. Enterprise CSS Injection ───────────────────────────────
+def inject_enterprise_css():
     st.markdown("""
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-        /* Base Theme */
-        html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-        [data-testid="stAppViewContainer"] { background-color: #070B14; color: #E2E8F0; }
-        [data-testid="stSidebar"] { background-color: #0F1523; border-right: 1px solid #1E293B; }
-        [data-testid="stHeader"] { background-color: transparent; }
-
-        /* Metric Cards */
-        [data-testid="stMetric"] {
-            background: linear-gradient(145deg, #131B2F, #0B101D);
-            border: 1px solid #1E293B;
-            border-radius: 16px;
-            padding: 1.2rem;
-            box-shadow: 0 8px 16px rgba(0,0,0,0.4);
-            transition: transform 0.2s ease;
-        }
-        [data-testid="stMetric"]:hover { transform: translateY(-2px); border-color: #34D399; }
-        [data-testid="stMetricValue"] { color: #F8FAFC; font-weight: 700; font-size: 1.8rem !important; }
-        [data-testid="stMetricLabel"] { color: #94A3B8; font-size: 0.85rem !important; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+        #MainMenu {visibility: hidden;}
+        header {visibility: hidden;}
+        footer {visibility: hidden;}
         
-        /* Delta Colors (Neon Green/Red) */
-        [data-testid="stMetricDelta"] svg { display: none; } /* Hide default arrows */
-        [data-testid="stMetricDelta"] { font-weight: 600; }
+        html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+        [data-testid="stAppViewContainer"] { background-color: #05070A; color: #E2E8F0; }
+        
+        .block-container { padding-top: 2rem; max-width: 95%; }
 
-        /* Tabs (Pill Style from Image) */
+        /* Glassmorphic Metric Cards */
+        [data-testid="stMetric"] {
+            background: rgba(15, 23, 42, 0.4);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 1.5rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        [data-testid="stMetric"]:hover { 
+            transform: translateY(-4px); 
+            border-color: rgba(16, 185, 129, 0.4);
+            box-shadow: 0 10px 20px -10px rgba(16, 185, 129, 0.2);
+        }
+        [data-testid="stMetricValue"] { color: #FFFFFF; font-weight: 800; font-size: 2rem !important; }
+        [data-testid="stMetricLabel"] { color: #64748B; font-size: 0.8rem !important; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+        [data-testid="stMetricDelta"] svg { display: none; }
+
+        /* App Tabs */
         .stTabs [data-baseweb="tab-list"] { 
-            background-color: transparent; gap: 12px; padding-bottom: 10px;
+            background-color: #0A0F18; border-radius: 12px; padding: 6px; gap: 4px; border: 1px solid #1A2333; width: fit-content;
         }
         .stTabs [data-baseweb="tab"] { 
-            background-color: #131B2F; color: #94A3B8; 
-            border-radius: 24px; padding: 8px 24px; 
-            border: 1px solid #1E293B; font-weight: 500;
-            transition: all 0.3s ease;
+            color: #64748B; border-radius: 8px; padding: 8px 24px; font-weight: 600; border: none; transition: all 0.2s ease;
         }
         .stTabs [aria-selected="true"] { 
-            background-color: #064E3B !important; 
-            color: #34D399 !important; 
-            border-color: #059669 !important; 
-            box-shadow: 0 0 12px rgba(52, 211, 153, 0.2);
+            background-color: #10B981 !important; color: #022C22 !important; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
         }
 
-        /* Buttons */
-        div.stButton > button {
-            background-color: #10B981; color: #022C22; 
-            border-radius: 24px; border: none; font-weight: 700;
-            padding: 0.5rem 1.5rem; transition: all 0.2s;
+        /* Inputs & Dropdowns styling for main screen */
+        .stTextInput > div > div > input { 
+            background-color: #0A0F18 !important; color: #F8FAFC !important; 
+            border: 1px solid #1A2333 !important; border-radius: 8px; font-weight: 600; font-size: 1.1rem; padding: 0.75rem;
         }
-        div.stButton > button:hover { background-color: #34D399; box-shadow: 0 0 15px rgba(16, 185, 129, 0.4); }
+        .stSelectbox > div > div {
+            background-color: #0A0F18 !important; color: #F8FAFC !important; 
+            border: 1px solid #1A2333 !important; border-radius: 8px; padding: 0.25rem;
+        }
 
-        /* Headers */
-        .header-title { font-size: 2.2rem; font-weight: 700; color: #F8FAFC; margin-bottom: 0; display: flex; align-items: center; gap: 10px;}
-        .header-title span { color: #10B981; } /* Accent color */
-        .header-sub { color: #64748B; font-size: 0.95rem; margin-top: 5px; }
-
-        /* Custom Ticker Tape */
+        /* Ticker Tape */
         .ticker-wrap {
-            width: 100%; overflow: hidden; background-color: #0B101D; 
-            border-top: 1px solid #1E293B; border-bottom: 1px solid #1E293B;
-            padding: 12px 0; margin: 20px 0; display: flex;
+            width: 100%; overflow: hidden; background: linear-gradient(90deg, #05070A 0%, #0A0F18 50%, #05070A 100%); 
+            border-top: 1px solid #1A2333; border-bottom: 1px solid #1A2333;
+            padding: 10px 0; margin-bottom: 1.5rem; display: flex;
         }
-        .ticker-item {
-            color: #E2E8F0; font-weight: 600; font-size: 0.95rem; margin-right: 40px; white-space: nowrap;
-        }
-        .ticker-up { color: #10B981; }
-        .ticker-down { color: #EF4444; }
+        .ticker-item { font-weight: 600; font-size: 0.85rem; margin-right: 50px; white-space: nowrap; color: #94A3B8; }
+        .pos { color: #10B981; } .neg { color: #EF4444; }
 
-        /* Signal Box (ML Prediction) */
-        .signal-box {
-            border-radius: 16px; padding: 2rem; text-align: center; font-size: 1.5rem; font-weight: 700;
-            background: linear-gradient(145deg, #131B2F, #0B101D); border: 1px solid #1E293B;
+        /* Primary Buttons */
+        div.stButton > button {
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+            color: white; border-radius: 8px; border: none; font-weight: 700; width: 100%;
+            height: 52px; margin-top: 28px; transition: all 0.2s;
         }
-        .buy { border-color: #10B981; color: #10B981; box-shadow: 0 0 20px rgba(16, 185, 129, 0.1); }
-        .sell { border-color: #EF4444; color: #EF4444; box-shadow: 0 0 20px rgba(239, 68, 68, 0.1); }
-        .hold { border-color: #F59E0B; color: #F59E0B; }
+        div.stButton > button:hover { opacity: 0.9; box-shadow: 0 0 20px rgba(16, 185, 129, 0.4); transform: scale(0.98); }
     </style>
     """, unsafe_allow_html=True)
 
-# ── Helper Functions ──────────────────────────────────────────
+# ── 3. Robust Data Fetching & Caching ─────────────────────────
 @st.cache_data(ttl=300, show_spinner=False)
-def fetch_stock_data(ticker: str, period: str = "1y") -> pd.DataFrame:
+def get_market_data(ticker: str, period: str) -> pd.DataFrame:
     try:
         df = yf.download(ticker, period=period, interval="1d", progress=False)
         if df.empty: return pd.DataFrame()
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
-    except: return pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
 
-@st.cache_data(ttl=60, show_spinner=False)
-def fetch_live_price(ticker: str) -> dict:
-    try:
-        info = yf.Ticker(ticker).fast_info
-        return {"price": round(info.last_price, 2), "prev_close": round(info.previous_close, 2)}
-    except: return {"price": None, "prev_close": None}
-
-def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
+def calculate_technicals(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    close = df["Close"]
-    df["SMA_20"] = close.rolling(20).mean()
-    df["SMA_50"] = close.rolling(50).mean()
-    
-    # RSI
-    delta = close.diff()
+    c = df["Close"]
+    df["SMA_20"], df["SMA_50"] = c.rolling(20).mean(), c.rolling(50).mean()
+    delta = c.diff()
     gain = delta.clip(lower=0).rolling(14).mean()
     loss = (-delta.clip(upper=0)).rolling(14).mean()
     df["RSI"] = 100 - (100 / (1 + gain / loss.replace(0, np.nan)))
-
-    # Bollinger Bands
-    sma20 = close.rolling(20).mean()
-    std20 = close.rolling(20).std()
-    df["BB_Upper"] = sma20 + 2 * std20
-    df["BB_Lower"] = sma20 - 2 * std20
-    
-    df["Vol_MA"] = df["Volume"].rolling(20).mean()
+    std20 = c.rolling(20).std()
+    df["BB_Upper"], df["BB_Lower"] = df["SMA_20"] + 2 * std20, df["SMA_20"] - 2 * std20
     return df
 
 @st.cache_resource(show_spinner=False)
-def ml_predict(df: pd.DataFrame) -> tuple:
-    df = add_indicators(df).dropna().copy()
-    if len(df) < 50: return "Need Data", 0.0, 0.0
+def ai_prediction_engine(df: pd.DataFrame):
+    df = calculate_technicals(df).dropna()
+    if len(df) < 60: return None, 0.0, 0.0
     
     df["Target"] = (df["Close"].shift(-1) > df["Close"]).astype(int)
     features = ["RSI", "SMA_20", "SMA_50", "BB_Upper", "BB_Lower"]
     df_train = df.dropna(subset=features + ["Target"])
     
+    if df_train.empty: return None, 0.0, 0.0
+
     X, y = df_train[features].values, df_train["Target"].values
     split = int(len(X) * 0.8)
-    X_train, X_test = X[:split], X[split:]
-    y_train, y_test = y[:split], y[split:]
-
+    
     scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_test = scaler.transform(X_test)
+    X_train = scaler.fit_transform(X[:split])
+    X_test = scaler.transform(X[split:])
 
     model = RandomForestClassifier(n_estimators=100, random_state=42, max_depth=5)
-    model.fit(X_train, y_train)
+    model.fit(X_train, y[:split])
 
-    acc = accuracy_score(y_test, model.predict(X_test))
+    acc = accuracy_score(y[split:], model.predict(X_test))
     prob = model.predict_proba(scaler.transform(df[features].iloc[-1].values.reshape(1, -1)))[0][1]
 
     signal = "BUY" if prob >= 0.55 else ("SELL" if prob <= 0.45 else "HOLD")
     return signal, round(prob * 100, 1), round(acc * 100, 1)
 
-# ── Main Application ──────────────────────────────────────────
+def calculate_sip(p, r, t):
+    """SIP Math Engine"""
+    i = (r / 100) / 12
+    n = t * 12
+    maturity = p * (((1 + i)**n - 1) / i) * (1 + i)
+    invested = p * n
+    returns = maturity - invested
+    return invested, returns, maturity
+
+# ── 4. App Controller (Main Loop) ─────────────────────────────
 def main():
-    inject_custom_css()
+    inject_enterprise_css()
 
-    # Sidebar
-    with st.sidebar:
-        st.markdown("<h2 style='color:#F8FAFC; font-weight:700;'>◭ Analyser</h2>", unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
-        stock_name = st.selectbox("Search Asset", list(NSE_STOCKS.keys()), index=0)
-        ticker = NSE_STOCKS[stock_name]
-        period = st.selectbox("Timeframe", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
+    if 'last_refresh' not in st.session_state:
+        st.session_state.last_refresh = time.time()
 
-    # Header
-    col1, col2 = st.columns([4, 1])
-    with col1:
-        st.markdown(f'<div class="header-title"><span>✦</span> {stock_name}</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="header-sub">{ticker} &nbsp;•&nbsp; Live Market Data</div>', unsafe_allow_html=True)
-    with col2:
-        st.write("") # Spacer
-        if st.button("✦ Quick Refresh", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
-
-    # Fetch Data
-    with st.spinner("Analyzing market structure..."):
-        df = fetch_stock_data(ticker, period)
-        live = fetch_live_price(ticker)
-
-    if df.empty:
-        st.error("Connection interrupted. Please try again.")
-        st.stop()
-
-    df_ind = add_indicators(df)
-
-    # Calculate current metrics
-    try:
-        price = live["price"] if live["price"] else float(df["Close"].iloc[-1])
-        prev = live["prev_close"] if live["prev_close"] else float(df["Close"].iloc[-2])
-        change = price - prev
-        change_p = (change / prev) * 100
-        sign = "+" if change >= 0 else ""
-    except:
-        price, prev, change, change_p, sign = 0.0, 0.0, 0.0, 0.0, ""
-
-    # Simulated Ticker Tape Layout (Static CSS marquee style)
+    # --- TOP NAV & TICKER TAPE ---
+    st.markdown("<h2 style='color:#10B981; font-weight:800; letter-spacing:-1px; margin-bottom:0.5rem;'>✦ QuantumAI Market Pro</h2>", unsafe_allow_html=True)
+    
     st.markdown(f"""
         <div class="ticker-wrap">
-            <div style="display:flex; animation: scroll 20s linear infinite;">
-                <span class="ticker-item">RELIANCE 2930.50 <span class="ticker-up">▲ 1.2%</span></span>
-                <span class="ticker-item">HDFCBANK 1435.20 <span class="ticker-down">▼ 0.8%</span></span>
-                <span class="ticker-item">INFY 1420.00 <span class="ticker-up">▲ 2.1%</span></span>
-                <span class="ticker-item">TCS 3890.10 <span class="ticker-up">▲ 0.5%</span></span>
-                <span class="ticker-item">ITC 410.25 <span class="ticker-down">▼ 1.1%</span></span>
+            <div style="display:flex; animation: scroll 25s linear infinite;">
+                <span class="ticker-item">NIFTY 50 22150.50 <span class="pos">▲ 0.8%</span></span>
+                <span class="ticker-item">BANKNIFTY 46500.20 <span class="pos">▲ 1.1%</span></span>
+                <span class="ticker-item">SENSEX 73000.00 <span class="pos">▲ 0.7%</span></span>
+                <span class="ticker-item">INDIA VIX 15.20 <span class="neg">▼ 2.4%</span></span>
+                <span class="ticker-item">USD/INR 82.90 <span class="pos">▲ 0.1%</span></span>
             </div>
         </div>
     """, unsafe_allow_html=True)
 
-    # Top Metrics Grid
+    # --- MAIN VISIBLE CONTROL BAR ---
+    st.markdown("""<div style="background: rgba(15, 23, 42, 0.4); border: 1px solid #1A2333; border-radius: 16px; padding: 20px; margin-bottom: 25px;">""", unsafe_allow_html=True)
+    
+    ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([3, 2, 1])
+    
+    with ctrl_col1:
+        ticker_input = st.text_input("🔍 Search Asset Ticker (e.g. AAPL, RELIANCE.NS, BTC-USD)", value="RELIANCE.NS")
+        ticker = ticker_input.upper().strip() if ticker_input else "RELIANCE.NS"
+        
+    with ctrl_col2:
+        period = st.selectbox("📅 Time Horizon", options=["1mo", "3mo", "6mo", "1y", "2y", "5y", "max"], index=3)
+        
+    with ctrl_col3:
+        if st.button("Force Sync ⚡"):
+            st.cache_data.clear()
+            st.session_state.last_refresh = time.time()
+            st.toast("Live data synchronized successfully.", icon="✅")
+            st.rerun()
+            
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # --- DATA FETCHING ---
+    with st.spinner(f"Establishing secure connection to {ticker} node..."):
+        df = get_market_data(ticker, period)
+    
+    if df.empty:
+        st.error(f"⚠️ Failed to fetch data for '{ticker}'. Please check if the ticker symbol is correct. (Remember to add .NS for Indian NSE stocks).")
+        st.stop()
+
+    df_tech = calculate_technicals(df)
+
+    # --- HEADER & METRICS ---
+    st.markdown(f"<h1 style='font-size:2.5rem; margin-bottom:0; color:#F8FAFC;'>{ticker} <span style='color:#64748B; font-size:1.2rem; font-weight:500;'>Live Market Data</span></h1>", unsafe_allow_html=True)
+    
+    current_px = float(df["Close"].iloc[-1])
+    prev_px = float(df["Close"].iloc[-2]) if len(df) > 1 else current_px
+    chg = current_px - prev_px
+    chg_pct = (chg / prev_px) * 100 if prev_px != 0 else 0
+    sign = "+" if chg >= 0 else ""
+
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Current Price", f"₹{price:,.2f}", f"{sign}{change:.2f} ({sign}{change_p:.2f}%)")
+    m1.metric("Market Value", f"₹{current_px:,.2f}", f"{sign}{chg:.2f} ({sign}{chg_pct:.2f}%)")
     m2.metric("Period High", f"₹{float(df['High'].max()):,.2f}")
     m3.metric("Period Low", f"₹{float(df['Low'].min()):,.2f}")
-    rsi_val = float(df_ind["RSI"].iloc[-1]) if not pd.isna(df_ind["RSI"].iloc[-1]) else 0.0
-    m4.metric("Technical RSI", f"{rsi_val:.1f}", "Overbought" if rsi_val > 70 else ("Oversold" if rsi_val < 30 else "Neutral"))
+    
+    rsi_latest = float(df_tech["RSI"].iloc[-1]) if not pd.isna(df_tech["RSI"].iloc[-1]) else 50.0
+    rsi_state = "Overbought" if rsi_latest > 70 else ("Oversold" if rsi_latest < 30 else "Neutral")
+    m4.metric("RSI Momentum", f"{rsi_latest:.1f}", rsi_state)
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
 
-    # Beautiful Tabs
-    tab1, tab2, tab3 = st.tabs(["✨ Quick Insights", "📈 Technical Analysis", "🤖 AI Price Prediction"])
+    # --- WORKSPACE TABS ---
+    t_market, t_tech, t_ai, t_sip = st.tabs(["Market Context", "Technical Overlay", "AI Oracle", "💰 Wealth Builder (SIP)"])
 
-    with tab1:
-        st.markdown("<h4 style='color:#E2E8F0; margin-bottom: 20px;'>Market Structure</h4>", unsafe_allow_html=True)
-        # Main Chart styled with Neon Colors
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.8, 0.2], vertical_spacing=0.02)
-        
+    with t_market:
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.8, 0.2], vertical_spacing=0.03)
         fig.add_trace(go.Candlestick(
             x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
-            increasing_line_color="#10B981", increasing_fillcolor="#10B981", # Neon Green
-            decreasing_line_color="#EF4444", decreasing_fillcolor="#EF4444", # Bright Red
-            name="Price"
+            increasing_line_color="#10B981", increasing_fillcolor="#10B981",
+            decreasing_line_color="#EF4444", decreasing_fillcolor="#EF4444", name="Price"
         ), row=1, col=1)
+        
+        vol_colors = ["#10B981" if df["Close"].iloc[i] >= df["Open"].iloc[i] else "#EF4444" for i in range(len(df))]
+        fig.add_trace(go.Bar(x=df.index, y=df["Volume"], marker_color=vol_colors, opacity=0.4, name="Volume"), row=2, col=1)
 
-        colors = ["#10B981" if df["Close"].iloc[i] >= df["Open"].iloc[i] else "#EF4444" for i in range(len(df))]
-        fig.add_trace(go.Bar(x=df.index, y=df["Volume"], marker_color=colors, opacity=0.5, name="Volume"), row=2, col=1)
+        fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", height=550, margin=dict(l=0, r=0, t=10, b=0), xaxis_rangeslider_visible=False, hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor="#1A2333")
+        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor="#1A2333")
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
-        fig.update_layout(
-            template="plotly_dark",
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            height=500, margin=dict(l=0, r=0, t=10, b=0),
-            xaxis_rangeslider_visible=False,
-            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01, bgcolor="rgba(15, 21, 35, 0.8)")
-        )
-        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor="#1E293B", zeroline=False)
-        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor="#1E293B", zeroline=False)
-        st.plotly_chart(fig, use_container_width=True)
-
-    with tab2:
-        st.markdown("<h4 style='color:#E2E8F0; margin-bottom: 20px;'>Advanced Overlays</h4>", unsafe_allow_html=True)
+    with t_tech:
         fig2 = go.Figure()
-        fig2.add_trace(go.Scatter(x=df.index, y=df["Close"], name="Close", line=dict(color="#94A3B8", width=1.5)))
-        fig2.add_trace(go.Scatter(x=df_ind.index, y=df_ind["SMA_20"], name="SMA 20", line=dict(color="#3B82F6", width=2)))
-        fig2.add_trace(go.Scatter(x=df_ind.index, y=df_ind["BB_Upper"], name="BB Upper", line=dict(color="#8B5CF6", width=1, dash="dot")))
-        fig2.add_trace(go.Scatter(x=df_ind.index, y=df_ind["BB_Lower"], name="BB Lower", line=dict(color="#8B5CF6", width=1, dash="dot"), fill="tonexty", fillcolor="rgba(139, 92, 246, 0.05)"))
+        fig2.add_trace(go.Scatter(x=df.index, y=df["Close"], name="Price Action", line=dict(color="#64748B", width=1.5)))
+        fig2.add_trace(go.Scatter(x=df_tech.index, y=df_tech["SMA_20"], name="SMA 20", line=dict(color="#3B82F6", width=2)))
+        fig2.add_trace(go.Scatter(x=df_tech.index, y=df_tech["SMA_50"], name="SMA 50", line=dict(color="#F59E0B", width=2)))
+        fig2.add_trace(go.Scatter(x=df_tech.index, y=df_tech["BB_Upper"], name="Upper Band", line=dict(color="#8B5CF6", width=1, dash="dot")))
+        fig2.add_trace(go.Scatter(x=df_tech.index, y=df_tech["BB_Lower"], name="Lower Band", line=dict(color="#8B5CF6", width=1, dash="dot"), fill="tonexty", fillcolor="rgba(139, 92, 246, 0.05)"))
         
-        fig2.update_layout(
-            template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", height=450,
-            margin=dict(l=0, r=0, t=10, b=0), legend=dict(bgcolor="rgba(15, 21, 35, 0.8)")
-        )
-        fig2.update_xaxes(gridcolor="#1E293B")
-        fig2.update_yaxes(gridcolor="#1E293B")
-        st.plotly_chart(fig2, use_container_width=True)
+        fig2.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", height=550, margin=dict(l=0, r=0, t=10, b=0), hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+        fig2.update_xaxes(gridcolor="#1A2333")
+        fig2.update_yaxes(gridcolor="#1A2333")
+        st.plotly_chart(fig2, use_container_width=True, config={'displayModeBar': False})
 
-    with tab3:
-        signal, prob, acc = ml_predict(df)
-        
-        st.markdown("<h4 style='color:#E2E8F0; margin-bottom: 20px;'>AI Strategy Builder</h4>", unsafe_allow_html=True)
-        
-        col_s1, col_s2 = st.columns([1, 2])
-        with col_s1:
-            css_class = "buy" if signal == "BUY" else ("sell" if signal == "SELL" else "hold")
-            st.markdown(f'''
-                <div class="signal-box {css_class}">
-                    <div style="font-size:0.9rem; color:#94A3B8; font-weight:500; text-transform:uppercase;">AI Signal</div>
-                    {signal}<br>
-                    <div style="font-size:1.1rem; margin-top:10px;">{prob}% Confidence</div>
+    with t_ai:
+        signal, prob, acc = ai_prediction_engine(df)
+        if signal:
+            c1, c2 = st.columns([1.5, 2])
+            with c1:
+                sig_color = "#10B981" if signal == "BUY" else ("#EF4444" if signal == "SELL" else "#F59E0B")
+                st.markdown(f"""
+                <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid {sig_color}40; border-radius: 16px; padding: 30px; text-align: center; height: 100%; display: flex; flex-direction: column; justify-content: center;">
+                    <p style="color:#64748B; font-weight:600; letter-spacing:1px; text-transform:uppercase; margin-bottom:10px;">Algorithmic Signal</p>
+                    <h2 style="color:{sig_color}; font-size:3rem; font-weight:800; margin:0;">{signal}</h2>
+                    <h3 style="color:#F8FAFC; margin-top:15px; font-weight:400;">Confidence: <b style="color:{sig_color}">{prob}%</b></h3>
                 </div>
-            ''', unsafe_allow_html=True)
-            
-        with col_s2:
+                """, unsafe_allow_html=True)
+            with c2:
+                st.markdown("""
+                <div style="background: rgba(15, 23, 42, 0.4); border: 1px solid #1A2333; border-radius: 16px; padding: 25px; height: 100%;">
+                    <h4 style="color:#F8FAFC; margin-top:0; border-bottom: 1px solid #1A2333; padding-bottom:10px;">Intelligence Node Diagnostics</h4>
+                    <p style="color:#94A3B8; font-size:0.95rem; line-height:1.6;">The QuantumAI engine utilizes a <b>Random Forest Classification</b> model predicting T+1 day price direction.</p>
+                    <div style="display:flex; justify-content: space-between; margin-top: 25px;">
+                        <div style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px; width: 48%; border: 1px solid #1A2333;"><span style="color:#64748B; font-size:0.8rem; text-transform:uppercase;">Out-of-Sample Acc</span><br><span style="color:#F8FAFC; font-size:1.5rem; font-weight:700;">{0}%</span></div>
+                        <div style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px; width: 48%; border: 1px solid #1A2333;"><span style="color:#64748B; font-size:0.8rem; text-transform:uppercase;">Data Points</span><br><span style="color:#F8FAFC; font-size:1.5rem; font-weight:700;">{1}</span></div>
+                    </div>
+                </div>
+                """.format(acc, len(df)), unsafe_allow_html=True)
+        else:
+            st.warning("Insufficient historical data. Select a wider timeframe.")
+
+    with t_sip:
+        st.markdown("<h3 style='color:#F8FAFC; margin-bottom:20px;'>Systematic Investment Plan (SIP)</h3>", unsafe_allow_html=True)
+        
+        col_inp1, col_inp2, col_inp3 = st.columns(3)
+        monthly_inv = col_inp1.number_input("Monthly Investment (₹)", min_value=500, max_value=1000000, value=10000, step=1000)
+        exp_return = col_inp2.number_input("Expected Annual Return (%)", min_value=1.0, max_value=50.0, value=12.0, step=0.5)
+        time_period = col_inp3.slider("Time Period (Years)", min_value=1, max_value=30, value=10)
+
+        inv_amt, est_ret, total_val = calculate_sip(monthly_inv, exp_return, time_period)
+
+        st.markdown("---")
+        
+        res_col1, res_col2 = st.columns([1, 1.5])
+        
+        with res_col1:
             st.markdown(f"""
-            <div style="background-color: #131B2F; border: 1px solid #1E293B; border-radius: 16px; padding: 20px; height: 100%;">
-                <h5 style="color:#10B981; margin-top:0;">Model Diagnostics</h5>
-                <p style="color:#94A3B8; font-size:0.95rem;">
-                The AI model analyzes historical patterns using Random Forest classification. 
-                It evaluates volatility (Bollinger Bands), momentum (RSI), and trend trajectories (SMAs).
-                </p>
-                <div style="display:flex; justify-content: space-between; border-top: 1px solid #1E293B; padding-top: 15px; margin-top:15px;">
-                    <div><span style="color:#64748B; font-size:0.85rem;">Test Accuracy</span><br><b style="color:#E2E8F0;">{acc}%</b></div>
-                    <div><span style="color:#64748B; font-size:0.85rem;">Engine</span><br><b style="color:#E2E8F0;">RandomForest</b></div>
-                    <div><span style="color:#64748B; font-size:0.85rem;">Horizon</span><br><b style="color:#E2E8F0;">1 Day (T+1)</b></div>
-                </div>
+            <div style="background: rgba(15, 23, 42, 0.4); border: 1px solid #1A2333; border-radius: 16px; padding: 25px;">
+                <p style="color:#64748B; font-size:0.9rem; text-transform:uppercase; margin-bottom:5px;">Invested Amount</p>
+                <h3 style="color:#F8FAFC; margin-top:0;">₹{inv_amt:,.0f}</h3>
+                <br>
+                <p style="color:#64748B; font-size:0.9rem; text-transform:uppercase; margin-bottom:5px;">Est. Returns Generated</p>
+                <h3 style="color:#10B981; margin-top:0;">+ ₹{est_ret:,.0f}</h3>
+                <hr style="border-color:#1A2333;">
+                <p style="color:#64748B; font-size:0.9rem; text-transform:uppercase; margin-bottom:5px;">Total Wealth Expected</p>
+                <h2 style="color:#3B82F6; margin-top:0; font-weight:800;">₹{total_val:,.0f}</h2>
             </div>
             """, unsafe_allow_html=True)
+
+            fig_pie = go.Figure(data=[go.Pie(
+                labels=['Invested Amount', 'Estimated Returns'], 
+                values=[inv_amt, est_ret], 
+                hole=.65, 
+                marker_colors=['#3B82F6', '#10B981'],
+                textinfo='percent', hoverinfo='label+value', textfont=dict(color='#F8FAFC', size=14)
+            )])
+            fig_pie.update_layout(
+                template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                height=300, margin=dict(t=30, b=10, l=10, r=10),
+                showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
+            )
+            fig_pie.add_annotation(text="Wealth<br>Split", x=0.5, y=0.5, font_size=16, font_color="#64748B", showarrow=False)
+            st.plotly_chart(fig_pie, use_container_width=True, config={'displayModeBar': False})
+
+        with res_col2:
+            years_arr = list(range(1, time_period + 1))
+            invested_arr = [monthly_inv * 12 * y for y in years_arr]
+            maturity_arr = [calculate_sip(monthly_inv, exp_return, y)[2] for y in years_arr]
+
+            fig_area = go.Figure()
+            fig_area.add_trace(go.Scatter(x=years_arr, y=invested_arr, name="Amount Invested", mode='lines', line=dict(color='#3B82F6', width=2), fill='tozeroy', fillcolor='rgba(59, 130, 246, 0.1)'))
+            fig_area.add_trace(go.Scatter(x=years_arr, y=maturity_arr, name="Total Value (Compounded)", mode='lines', line=dict(color='#10B981', width=3), fill='tonexty', fillcolor='rgba(16, 185, 129, 0.2)'))
+            fig_area.update_layout(
+                title="Wealth Compounding Curve", template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                height=450, margin=dict(t=50, b=10, l=10, r=10), hovermode="x unified",
+                xaxis_title="Years", yaxis_title="Total Value (₹)", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            fig_area.update_xaxes(gridcolor="#1A2333", showgrid=True)
+            fig_area.update_yaxes(gridcolor="#1A2333", showgrid=True)
+            st.plotly_chart(fig_area, use_container_width=True, config={'displayModeBar': False})
 
 if __name__ == "__main__":
     main()
