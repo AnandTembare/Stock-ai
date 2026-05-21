@@ -167,15 +167,12 @@ def main():
     if 'last_refresh' not in st.session_state:
         st.session_state.last_refresh = time.time()
 
-with st.sidebar:
+    with st.sidebar:
         st.markdown("<h2 style='color:#10B981; font-weight:800; letter-spacing:-1px; margin-bottom:2rem;'>✦ QuantumAI</h2>", unsafe_allow_html=True)
         
-        # --- NEW UNIVERSAL SEARCH BOX ---
-        st.markdown("<p style='color:#64748B; font-size:0.8rem; font-weight:600; text-transform:uppercase;'>Enter Asset Ticker</p>", unsafe_allow_html=True)
-        st.caption("E.g., RELIANCE.NS, AAPL, BTC-USD")
-        ticker = st.text_input("Ticker", value="RELIANCE.NS", label_visibility="collapsed").upper()
-        selected_asset = ticker # Use the ticker as the display name
-        # --------------------------------
+        st.markdown("<p style='color:#64748B; font-size:0.8rem; font-weight:600; text-transform:uppercase;'>Asset Selection</p>", unsafe_allow_html=True)
+        selected_asset = st.selectbox("Ticker", list(ASSETS.keys()), label_visibility="collapsed")
+        ticker = ASSETS[selected_asset]
         
         st.markdown("<p style='color:#64748B; font-size:0.8rem; font-weight:600; text-transform:uppercase; margin-top:1rem;'>Horizon</p>", unsafe_allow_html=True)
         period = st.select_slider("Timeframe", options=["1mo", "3mo", "6mo", "1y", "2y", "5y"], value="1y", label_visibility="collapsed")
