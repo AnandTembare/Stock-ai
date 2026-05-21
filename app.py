@@ -1,300 +1,507 @@
-from __future__ import annotations
+# ============================================================
+#  Indian Stock Market Analyser — Anand Tembare
+#  Single-file Streamlit app | Live NSE/BSE data via yfinance
+# ============================================================
 
-import sys
-from pathlib import Path
+import warnings
+warnings.filterwarnings("ignore")
 
-import pandas as pd
 import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+import yfinance as yf
+from datetime import datetime, timedelta
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score
+import time
 
-
-PROJECT_ROOT = Path(__file__).resolve().parent
-SRC_ROOT = PROJECT_ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-
-from stock_app.backtest import run_signal_backtest
-from stock_app.data import fetch_yahoo_data, generate_demo_ohlcv, normalize_ohlcv
-from stock_app.features import DEFAULT_FEATURES, add_technical_indicators, build_feature_frame
-from stock_app.models import feature_importance, latest_probability, train_time_series_classifier
-from stock_app.plots import confusion_matrix_chart, drawdown_chart, equity_curve_chart, price_chart, probability_chart, roc_chart
-from stock_app.risk import position_size, risk_profile
-
-
-st.set_page_config(page_title="Stock Analysis & Prediction", layout="wide")
-
-st.markdown(
-    """
-    <style>
-    .block-container {padding-top: 1.3rem; padding-bottom: 2rem;}
-    [data-testid="stMetric"] {
-        background: #ffffff;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        padding: 0.8rem 0.9rem;
-    }
-    .small-note {color: #64748b; font-size: 0.88rem;}
-    </style>
-    """,
-    unsafe_allow_html=True,
+# ── Page config ──────────────────────────────────────────────
+st.set_page_config(
+    page_title="Indian Market Analyser",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
+# ── CSS Styling ───────────────────────────────────────────────
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@400;500;600&display=swap');
 
-@st.cache_data(show_spinner=False)
-def load_demo_data(symbol: str, years: int) -> pd.DataFrame:
-    return generate_demo_ohlcv(symbol=symbol, years=years)
+    html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 
+    .block-container { padding-top: 1.2rem; padding-bottom: 2rem; }
 
-@st.cache_data(show_spinner=False, ttl=900)
-def load_yahoo_data(symbol: str, period: str, interval: str) -> pd.DataFrame:
-    return fetch_yahoo_data(symbol=symbol, period=period, interval=interval)
-
-
-def pct(value: float | None) -> str:
-    if value is None:
-        return "n/a"
-    return f"{value:.2%}"
-
-
-def num(value: float | int | None, decimals: int = 2) -> str:
-    if value is None:
-        return "n/a"
-    if isinstance(value, int):
-        return f"{value:,}"
-    return f"{value:,.{decimals}f}"
-
-
-def app_sidebar() -> dict:
-    with st.sidebar:
-        st.title("Control Panel")
-        source = st.selectbox("Data source", ["Demo data", "Yahoo Finance", "Upload CSV"])
-        symbol = st.text_input("Symbol", value="AAPL").strip().upper() or "AAPL"
-
-        demo_years = st.slider("Demo history", 2, 10, 6)
-        period = st.selectbox("Yahoo period", ["1y", "2y", "5y", "10y", "max"], index=2)
-        interval = st.selectbox("Yahoo interval", ["1d", "1wk"], index=0)
-        uploaded_file = st.file_uploader("CSV file", type=["csv"])
-
-        st.divider()
-        model_name = st.selectbox(
-            "Model",
-            ["Soft Voting Ensemble", "Random Forest", "Gradient Boosting", "Logistic Regression"],
-        )
-        horizon = st.slider("Forecast horizon", 1, 10, 1)
-        test_size = st.slider("Out-of-sample test size", 0.15, 0.40, 0.25, 0.05)
-        threshold = st.slider("Entry probability", 0.50, 0.80, 0.56, 0.01)
-        sentiment_score = st.slider("Sentiment input", -1.0, 1.0, 0.0, 0.05)
-
-        st.divider()
-        starting_capital = st.number_input("Starting capital", min_value=1_000, value=100_000, step=5_000)
-        risk_per_trade = st.slider("Risk per trade", 0.0025, 0.05, 0.01, 0.0025)
-        max_position_pct = st.slider("Max position", 0.05, 1.0, 0.25, 0.05)
-        atr_multiplier = st.slider("ATR stop multiplier", 0.5, 5.0, 2.0, 0.25)
-        transaction_cost_bps = st.slider("Transaction cost bps", 0, 50, 5)
-
-    return {
-        "source": source,
-        "symbol": symbol,
-        "demo_years": demo_years,
-        "period": period,
-        "interval": interval,
-        "uploaded_file": uploaded_file,
-        "model_name": model_name,
-        "horizon": horizon,
-        "test_size": test_size,
-        "threshold": threshold,
-        "sentiment_score": sentiment_score,
-        "starting_capital": float(starting_capital),
-        "risk_per_trade": float(risk_per_trade),
-        "max_position_pct": float(max_position_pct),
-        "atr_multiplier": float(atr_multiplier),
-        "transaction_cost_bps": float(transaction_cost_bps),
+    [data-testid="stMetric"] {
+        background: linear-gradient(135deg, #0f172a, #1e293b);
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 1rem 1.2rem;
     }
+    [data-testid="stMetricValue"] { color: #f0fdf4; font-family: 'Space Mono', monospace; font-size: 1.4rem !important; }
+    [data-testid="stMetricLabel"] { color: #94a3b8; font-size: 0.78rem !important; text-transform: uppercase; letter-spacing: 0.05em; }
+    [data-testid="stMetricDelta"] { font-size: 0.85rem !important; }
 
+    .stTabs [data-baseweb="tab-list"] { background: #0f172a; border-radius: 10px; padding: 4px; gap: 4px; }
+    .stTabs [data-baseweb="tab"] { color: #94a3b8; border-radius: 8px; padding: 6px 18px; font-weight: 500; }
+    .stTabs [aria-selected="true"] { background: #1d4ed8 !important; color: white !important; }
 
-def load_selected_data(config: dict) -> pd.DataFrame:
-    source = config["source"]
-    if source == "Demo data":
-        return load_demo_data(config["symbol"], config["demo_years"])
+    .signal-box {
+        border-radius: 12px;
+        padding: 1.2rem 1.5rem;
+        font-family: 'Space Mono', monospace;
+        font-size: 1.1rem;
+        font-weight: 700;
+        text-align: center;
+        margin: 0.5rem 0;
+    }
+    .buy  { background: #052e16; border: 2px solid #16a34a; color: #4ade80; }
+    .sell { background: #450a0a; border: 2px solid #dc2626; color: #f87171; }
+    .hold { background: #1c1917; border: 2px solid #ca8a04; color: #facc15; }
 
-    if source == "Yahoo Finance":
-        try:
-            return load_yahoo_data(config["symbol"], config["period"], config["interval"])
-        except Exception as exc:
-            st.warning(f"Yahoo Finance could not load this symbol, so demo data is shown instead. Details: {exc}")
-            return load_demo_data(config["symbol"], config["demo_years"])
+    .header-title {
+        font-family: 'Space Mono', monospace;
+        font-size: 1.9rem;
+        font-weight: 700;
+        color: #f8fafc;
+        letter-spacing: -0.02em;
+    }
+    .header-sub { color: #64748b; font-size: 0.9rem; margin-top: 0.2rem; }
 
-    uploaded_file = config["uploaded_file"]
-    if uploaded_file is None:
-        st.info("Upload a CSV to use the CSV data source, or switch to demo data.")
-        st.stop()
+    div[data-testid="stSidebar"] { background: #0f172a; border-right: 1px solid #1e293b; }
+    div[data-testid="stSidebar"] * { color: #cbd5e1 !important; }
+    div[data-testid="stSidebar"] .stSelectbox label,
+    div[data-testid="stSidebar"] .stSlider label { color: #94a3b8 !important; font-size: 0.82rem !important; text-transform: uppercase; letter-spacing: 0.05em; }
+</style>
+""", unsafe_allow_html=True)
 
-    return normalize_ohlcv(pd.read_csv(uploaded_file))
+# ── Top 50 NSE Stocks ─────────────────────────────────────────
+NSE_STOCKS = {
+    "Reliance Industries": "RELIANCE.NS",
+    "TCS": "TCS.NS",
+    "HDFC Bank": "HDFCBANK.NS",
+    "Infosys": "INFY.NS",
+    "ICICI Bank": "ICICIBANK.NS",
+    "Hindustan Unilever": "HINDUNILVR.NS",
+    "ITC": "ITC.NS",
+    "SBI": "SBIN.NS",
+    "Bharti Airtel": "BHARTIARTL.NS",
+    "Kotak Mahindra Bank": "KOTAKBANK.NS",
+    "Wipro": "WIPRO.NS",
+    "Bajaj Finance": "BAJFINANCE.NS",
+    "HCL Technologies": "HCLTECH.NS",
+    "Asian Paints": "ASIANPAINT.NS",
+    "L&T": "LT.NS",
+    "Axis Bank": "AXISBANK.NS",
+    "Maruti Suzuki": "MARUTI.NS",
+    "Sun Pharma": "SUNPHARMA.NS",
+    "Titan Company": "TITAN.NS",
+    "NTPC": "NTPC.NS",
+    "UltraTech Cement": "ULTRACEMCO.NS",
+    "Tech Mahindra": "TECHM.NS",
+    "Power Grid": "POWERGRID.NS",
+    "Nestle India": "NESTLEIND.NS",
+    "Bajaj Auto": "BAJAJ-AUTO.NS",
+    "Tata Motors": "TATAMOTORS.NS",
+    "Adani Ports": "ADANIPORTS.NS",
+    "JSW Steel": "JSWSTEEL.NS",
+    "Tata Steel": "TATASTEEL.NS",
+    "IndusInd Bank": "INDUSINDBK.NS",
+    "Divis Lab": "DIVISLAB.NS",
+    "Cipla": "CIPLA.NS",
+    "Dr Reddys": "DRREDDY.NS",
+    "ONGC": "ONGC.NS",
+    "Coal India": "COALINDIA.NS",
+    "BPCL": "BPCL.NS",
+    "Hero MotoCorp": "HEROMOTOCO.NS",
+    "Eicher Motors": "EICHERMOT.NS",
+    "Shree Cement": "SHREECEM.NS",
+    "Grasim": "GRASIM.NS",
+    "Hindalco": "HINDALCO.NS",
+    "Tata Consumer": "TATACONSUM.NS",
+    "Apollo Hospitals": "APOLLOHOSP.NS",
+    "Divi's": "DIVISLAB.NS",
+    "Britannia": "BRITANNIA.NS",
+    "HDFC Life": "HDFCLIFE.NS",
+    "SBI Life": "SBILIFE.NS",
+    "Bajaj Finserv": "BAJAJFINSV.NS",
+    "Tata Consultancy": "TCS.NS",
+    "Nifty 50 Index": "^NSEI",
+}
 
+INDICES = {
+    "Nifty 50": "^NSEI",
+    "Sensex": "^BSESN",
+    "Nifty Bank": "^NSEBANK",
+    "Nifty IT": "^CNXIT",
+}
 
-def main() -> None:
-    config = app_sidebar()
+# ── Helper Functions ──────────────────────────────────────────
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_stock_data(ticker: str, period: str = "1y") -> pd.DataFrame:
+    try:
+        df = yf.download(ticker, period=period, interval="1d", auto_adjust=True, progress=False)
+        if df.empty:
+            return pd.DataFrame()
+        df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+        df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
+        return df
+    except Exception:
+        return pd.DataFrame()
 
-    st.title("Stock Analysis & Prediction App")
-    st.markdown(
-        '<span class="small-note">Research dashboard for market indicators, ML direction signals, backtesting, and ATR-based risk sizing. Not financial advice.</span>',
-        unsafe_allow_html=True,
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_live_price(ticker: str) -> dict:
+    try:
+        info = yf.Ticker(ticker).fast_info
+        return {
+            "price": round(info.last_price, 2),
+            "prev_close": round(info.previous_close, 2),
+            "market_cap": info.market_cap,
+        }
+    except Exception:
+        return {"price": None, "prev_close": None, "market_cap": None}
+
+def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    close = df["Close"]
+
+    df["SMA_20"]  = close.rolling(20).mean()
+    df["SMA_50"]  = close.rolling(50).mean()
+    df["EMA_20"]  = close.ewm(span=20, adjust=False).mean()
+
+    # RSI
+    delta = close.diff()
+    gain  = delta.clip(lower=0).rolling(14).mean()
+    loss  = (-delta.clip(upper=0)).rolling(14).mean()
+    rs    = gain / loss.replace(0, np.nan)
+    df["RSI"] = 100 - (100 / (1 + rs))
+
+    # MACD
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    df["MACD"]        = ema12 - ema26
+    df["MACD_Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
+
+    # Bollinger Bands
+    sma20   = close.rolling(20).mean()
+    std20   = close.rolling(20).std()
+    df["BB_Upper"] = sma20 + 2 * std20
+    df["BB_Lower"] = sma20 - 2 * std20
+
+    # ATR
+    hl  = df["High"] - df["Low"]
+    hpc = (df["High"] - close.shift()).abs()
+    lpc = (df["Low"]  - close.shift()).abs()
+    df["ATR"] = pd.concat([hl, hpc, lpc], axis=1).max(axis=1).rolling(14).mean()
+
+    # Volume MA
+    df["Vol_MA"] = df["Volume"].rolling(20).mean()
+
+    return df
+
+def ml_predict(df: pd.DataFrame) -> tuple[str, float, float]:
+    df = add_indicators(df).dropna().copy()
+    if len(df) < 100:
+        return "Not enough data", 0.0, 0.0
+
+    df["Target"] = (df["Close"].shift(-1) > df["Close"]).astype(int)
+    features = ["RSI", "MACD", "MACD_Signal", "ATR",
+                "SMA_20", "SMA_50", "EMA_20", "BB_Upper", "BB_Lower"]
+    df = df.dropna(subset=features + ["Target"])
+
+    X = df[features].values
+    y = df["Target"].values
+
+    split = int(len(X) * 0.80)
+    X_train, X_test = X[:split], X[split:]
+    y_train, y_test = y[:split], y[split:]
+
+    scaler  = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test  = scaler.transform(X_test)
+
+    model = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+    model.fit(X_train, y_train)
+
+    acc   = accuracy_score(y_test, model.predict(X_test))
+    prob  = model.predict_proba(scaler.transform(X[-1:].reshape(1, -1)))[0][1]
+
+    signal = "BUY 🟢" if prob >= 0.55 else ("SELL 🔴" if prob <= 0.45 else "HOLD 🟡")
+    return signal, round(prob * 100, 1), round(acc * 100, 1)
+
+# ── Sidebar ───────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("### 📈 Indian Market Analyser")
+    st.markdown("---")
+
+    stock_name = st.selectbox("Select Stock", list(NSE_STOCKS.keys()), index=0)
+    ticker     = NSE_STOCKS[stock_name]
+    period     = st.selectbox("Period", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
+
+    st.markdown("---")
+    st.markdown("**Compare with Index**")
+    show_index   = st.checkbox("Show Index Overlay", value=False)
+    index_choice = st.selectbox("Index", list(INDICES.keys()), index=0)
+
+    st.markdown("---")
+    st.caption("Data: Yahoo Finance (NSE/BSE)\nBuilt by Anand Tembare")
+
+# ── Header ────────────────────────────────────────────────────
+col_h1, col_h2 = st.columns([3, 1])
+with col_h1:
+    st.markdown(f'<div class="header-title">📊 {stock_name}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="header-sub">NSE Ticker: {ticker} &nbsp;|&nbsp; Live Indian Market Data</div>', unsafe_allow_html=True)
+with col_h2:
+    if st.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+
+st.markdown("---")
+
+# ── Fetch Data ────────────────────────────────────────────────
+with st.spinner(f"Fetching live data for {stock_name}..."):
+    df   = fetch_stock_data(ticker, period)
+    live = fetch_live_price(ticker)
+
+if df.empty:
+    st.error("Could not fetch data. Check your internet or try another stock.")
+    st.stop()
+
+df_ind = add_indicators(df)
+
+# ── Key Metrics ───────────────────────────────────────────────
+price     = live["price"] or float(df["Close"].iloc[-1])
+prev      = live["prev_close"] or float(df["Close"].iloc[-2])
+change    = price - prev
+change_p  = (change / prev) * 100
+high_52   = float(df["High"].max())
+low_52    = float(df["Low"].min())
+avg_vol   = int(df["Volume"].mean())
+rsi_val   = float(df_ind["RSI"].iloc[-1]) if "RSI" in df_ind.columns else 0.0
+
+m1, m2, m3, m4, m5, m6 = st.columns(6)
+m1.metric("Live Price", f"₹{price:,.2f}", f"{change:+.2f} ({change_p:+.2f}%)")
+m2.metric("52W High",   f"₹{high_52:,.2f}")
+m3.metric("52W Low",    f"₹{low_52:,.2f}")
+m4.metric("RSI (14)",   f"{rsi_val:.1f}", "Overbought" if rsi_val > 70 else ("Oversold" if rsi_val < 30 else "Neutral"))
+m5.metric("Avg Volume", f"{avg_vol:,}")
+m6.metric("Data Points", f"{len(df):,}")
+
+st.markdown("---")
+
+# ── Tabs ──────────────────────────────────────────────────────
+tab1, tab2, tab3, tab4 = st.tabs(["📈 Price Chart", "📊 Indicators", "🤖 ML Prediction", "📋 Raw Data"])
+
+# ── TAB 1: Price Chart ────────────────────────────────────────
+with tab1:
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        row_heights=[0.75, 0.25],
+        vertical_spacing=0.04,
     )
 
-    raw_data = load_selected_data(config)
-    feature_frame = build_feature_frame(raw_data, horizon=config["horizon"], sentiment_score=config["sentiment_score"])
-    if len(feature_frame) < 160:
-        st.error("The selected dataset is too small after indicator warm-up. Use a longer period or a larger CSV.")
-        st.stop()
+    # Candlestick
+    fig.add_trace(go.Candlestick(
+        x=df.index, open=df["Open"], high=df["High"],
+        low=df["Low"], close=df["Close"],
+        name="OHLC",
+        increasing_line_color="#22c55e",
+        decreasing_line_color="#ef4444",
+    ), row=1, col=1)
 
-    feature_columns = [column for column in DEFAULT_FEATURES if column in feature_frame.columns]
-    model_result = train_time_series_classifier(
-        feature_frame=feature_frame,
-        feature_columns=feature_columns,
-        model_name=config["model_name"],
-        test_size=config["test_size"],
+    # Moving Averages
+    fig.add_trace(go.Scatter(x=df_ind.index, y=df_ind["SMA_20"], name="SMA 20",
+                             line=dict(color="#60a5fa", width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df_ind.index, y=df_ind["SMA_50"], name="SMA 50",
+                             line=dict(color="#f59e0b", width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df_ind.index, y=df_ind["BB_Upper"], name="BB Upper",
+                             line=dict(color="#a78bfa", width=1, dash="dot")), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df_ind.index, y=df_ind["BB_Lower"], name="BB Lower",
+                             line=dict(color="#a78bfa", width=1, dash="dot"),
+                             fill="tonexty", fillcolor="rgba(167,139,250,0.05)"), row=1, col=1)
+
+    # Volume
+    colors = ["#22c55e" if df["Close"].iloc[i] >= df["Open"].iloc[i] else "#ef4444"
+              for i in range(len(df))]
+    fig.add_trace(go.Bar(x=df.index, y=df["Volume"], name="Volume",
+                         marker_color=colors, opacity=0.7), row=2, col=1)
+    fig.add_trace(go.Scatter(x=df_ind.index, y=df_ind["Vol_MA"], name="Vol MA",
+                             line=dict(color="#f59e0b", width=1.5)), row=2, col=1)
+
+    # Index overlay
+    if show_index:
+        idx_df = fetch_stock_data(INDICES[index_choice], period)
+        if not idx_df.empty:
+            norm_idx   = idx_df["Close"] / idx_df["Close"].iloc[0]
+            norm_stock = df["Close"] / df["Close"].iloc[0]
+            fig2 = go.Figure()
+            fig2.add_trace(go.Scatter(x=norm_stock.index, y=norm_stock, name=stock_name,
+                                      line=dict(color="#60a5fa", width=2)))
+            fig2.add_trace(go.Scatter(x=norm_idx.index, y=norm_idx, name=index_choice,
+                                      line=dict(color="#f59e0b", width=2)))
+            fig2.update_layout(template="plotly_dark", paper_bgcolor="#0f172a",
+                               plot_bgcolor="#0f172a", height=300,
+                               title="Normalised Performance vs Index",
+                               legend=dict(bgcolor="#1e293b"))
+            st.plotly_chart(fig2, use_container_width=True)
+
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="#0f172a",
+        plot_bgcolor="#0f172a",
+        height=560,
+        showlegend=True,
+        legend=dict(bgcolor="#1e293b", bordercolor="#334155", borderwidth=1),
+        xaxis_rangeslider_visible=False,
+        margin=dict(l=10, r=10, t=30, b=10),
     )
+    fig.update_yaxes(gridcolor="#1e293b")
+    fig.update_xaxes(gridcolor="#1e293b")
+    st.plotly_chart(fig, use_container_width=True)
 
-    latest_features = feature_frame[feature_columns].iloc[[-1]]
-    latest_buy_probability = latest_probability(model_result.model, latest_features)
-    latest_close = float(feature_frame["Close"].iloc[-1])
-    latest_atr = float(feature_frame["ATR_14"].iloc[-1])
-    signal = "Long setup" if latest_buy_probability >= config["threshold"] else "Cash watch"
+# ── TAB 2: Indicators ─────────────────────────────────────────
+with tab2:
+    col_a, col_b = st.columns(2)
 
-    backtest = run_signal_backtest(
-        feature_frame=feature_frame,
-        probabilities=model_result.probabilities,
-        threshold=config["threshold"],
-        starting_capital=config["starting_capital"],
-        transaction_cost_bps=config["transaction_cost_bps"],
-        risk_per_trade=config["risk_per_trade"],
-        atr_multiplier=config["atr_multiplier"],
-        max_position_pct=config["max_position_pct"],
-    )
-    position_plan = position_size(
-        capital=config["starting_capital"],
-        entry_price=latest_close,
-        atr=latest_atr,
-        risk_per_trade=config["risk_per_trade"],
-        atr_multiplier=config["atr_multiplier"],
-        max_position_pct=config["max_position_pct"],
-    )
-    profile = risk_profile(
-        latest_buy_probability,
-        backtest.metrics["max_drawdown"],
-        backtest.metrics["sharpe"],
-    )
+    with col_a:
+        # RSI Chart
+        fig_rsi = go.Figure()
+        fig_rsi.add_trace(go.Scatter(x=df_ind.index, y=df_ind["RSI"],
+                                     name="RSI", line=dict(color="#60a5fa", width=2)))
+        fig_rsi.add_hline(y=70, line_dash="dash", line_color="#ef4444", annotation_text="Overbought 70")
+        fig_rsi.add_hline(y=30, line_dash="dash", line_color="#22c55e", annotation_text="Oversold 30")
+        fig_rsi.update_layout(template="plotly_dark", paper_bgcolor="#0f172a",
+                               plot_bgcolor="#0f172a", height=280, title="RSI (14)",
+                               yaxis=dict(range=[0, 100], gridcolor="#1e293b"),
+                               xaxis=dict(gridcolor="#1e293b"), margin=dict(t=40, b=10))
+        st.plotly_chart(fig_rsi, use_container_width=True)
 
-    metric_cols = st.columns(6)
-    metric_cols[0].metric("Latest close", num(latest_close))
-    metric_cols[1].metric("Buy probability", pct(latest_buy_probability))
-    metric_cols[2].metric("Signal", signal)
-    metric_cols[3].metric("ROC-AUC", num(model_result.metrics["roc_auc"], 3) if model_result.metrics["roc_auc"] is not None else "n/a")
-    metric_cols[4].metric("Sharpe", num(backtest.metrics["sharpe"]))
-    metric_cols[5].metric("Risk profile", profile)
+    with col_b:
+        # MACD Chart
+        fig_macd = go.Figure()
+        fig_macd.add_trace(go.Scatter(x=df_ind.index, y=df_ind["MACD"],
+                                      name="MACD", line=dict(color="#60a5fa", width=2)))
+        fig_macd.add_trace(go.Scatter(x=df_ind.index, y=df_ind["MACD_Signal"],
+                                      name="Signal", line=dict(color="#f59e0b", width=1.5)))
+        hist_colors = ["#22c55e" if v >= 0 else "#ef4444"
+                       for v in (df_ind["MACD"] - df_ind["MACD_Signal"])]
+        fig_macd.add_trace(go.Bar(x=df_ind.index,
+                                   y=df_ind["MACD"] - df_ind["MACD_Signal"],
+                                   name="Histogram", marker_color=hist_colors, opacity=0.6))
+        fig_macd.update_layout(template="plotly_dark", paper_bgcolor="#0f172a",
+                                plot_bgcolor="#0f172a", height=280, title="MACD",
+                                yaxis=dict(gridcolor="#1e293b"),
+                                xaxis=dict(gridcolor="#1e293b"), margin=dict(t=40, b=10))
+        st.plotly_chart(fig_macd, use_container_width=True)
 
-    chart_frame = add_technical_indicators(raw_data).dropna().tail(420)
-    tabs = st.tabs(["Market", "Model", "Backtest", "Risk", "Data"])
+    # Indicator Summary Table
+    st.markdown("#### 📋 Indicator Summary")
+    latest = df_ind.iloc[-1]
 
-    with tabs[0]:
-        st.plotly_chart(price_chart(chart_frame, f"{config['symbol']} price and moving averages"), use_container_width=True)
-        left, right = st.columns([2, 1])
-        with left:
-            st.plotly_chart(probability_chart(model_result.probabilities, config["threshold"]), use_container_width=True)
-        with right:
-            latest_table = pd.DataFrame(
-                {
-                    "Metric": ["Close", "ATR 14", "RSI 14", "SMA 50 ratio", "SMA 200 ratio"],
-                    "Value": [
-                        latest_close,
-                        latest_atr,
-                        float(feature_frame["RSI_14"].iloc[-1]),
-                        float(feature_frame["SMA_Ratio_50"].iloc[-1]),
-                        float(feature_frame["SMA_Ratio_200"].iloc[-1]),
-                    ],
-                }
-            )
-            st.dataframe(latest_table, hide_index=True, use_container_width=True)
+    def rsi_signal(r):
+        if r > 70: return "⚠️ Overbought"
+        if r < 30: return "✅ Oversold (Buy zone)"
+        return "➡️ Neutral"
 
-    with tabs[1]:
-        left, right = st.columns(2)
-        with left:
-            st.subheader("ROC Curve")
-            st.plotly_chart(roc_chart(model_result.roc_curve, model_result.metrics["roc_auc"]), use_container_width=True)
-        with right:
-            st.subheader("Confusion Matrix")
-            st.plotly_chart(confusion_matrix_chart(model_result.confusion_matrix), use_container_width=True)
+    def macd_signal(m, s):
+        return "✅ Bullish (MACD > Signal)" if m > s else "🔴 Bearish (MACD < Signal)"
 
-        metrics_table = pd.DataFrame(
-            [
-                {"Metric": "Accuracy", "Value": pct(model_result.metrics["accuracy"])},
-                {"Metric": "Precision", "Value": pct(model_result.metrics["precision"])},
-                {"Metric": "Recall", "Value": pct(model_result.metrics["recall"])},
-                {"Metric": "F1 score", "Value": num(model_result.metrics["f1"], 3)},
-                {"Metric": "Model used", "Value": model_result.model_name},
-                {"Metric": "Training rows", "Value": num(len(model_result.train_index), 0)},
-                {"Metric": "Test rows", "Value": num(len(model_result.test_index), 0)},
-            ]
-        )
-        st.dataframe(metrics_table, hide_index=True, use_container_width=True)
+    def sma_signal(price, sma):
+        return "✅ Bullish (Above SMA)" if price > sma else "🔴 Bearish (Below SMA)"
 
-        importance = feature_importance(model_result.model, feature_columns)
-        if not importance.empty:
-            st.subheader("Feature Importance")
-            st.bar_chart(importance.set_index("Feature"))
-        else:
-            st.caption("Feature importance is not available for this model configuration.")
+    summary_data = {
+        "Indicator": ["RSI (14)", "MACD", "SMA 20", "SMA 50", "ATR (14)"],
+        "Value": [
+            f"{latest['RSI']:.2f}",
+            f"{latest['MACD']:.2f}",
+            f"₹{latest['SMA_20']:.2f}",
+            f"₹{latest['SMA_50']:.2f}",
+            f"₹{latest['ATR']:.2f}",
+        ],
+        "Signal": [
+            rsi_signal(latest["RSI"]),
+            macd_signal(latest["MACD"], latest["MACD_Signal"]),
+            sma_signal(float(df["Close"].iloc[-1]), latest["SMA_20"]),
+            sma_signal(float(df["Close"].iloc[-1]), latest["SMA_50"]),
+            "Volatility measure",
+        ],
+    }
+    st.dataframe(pd.DataFrame(summary_data), hide_index=True, use_container_width=True)
 
-    with tabs[2]:
-        st.plotly_chart(equity_curve_chart(backtest.equity), use_container_width=True)
-        st.plotly_chart(drawdown_chart(backtest.equity), use_container_width=True)
-        cols = st.columns(6)
-        cols[0].metric("Final value", f"${backtest.metrics['final_value']:,.0f}")
-        cols[1].metric("Annual return", pct(backtest.metrics["annual_return"]))
-        cols[2].metric("Buy-hold annual", pct(backtest.metrics["buy_hold_annual_return"]))
-        cols[3].metric("Max drawdown", pct(backtest.metrics["max_drawdown"]))
-        cols[4].metric("Win rate", pct(backtest.metrics["win_rate"]))
-        cols[5].metric("Trades", num(backtest.metrics["trades"], 0))
+# ── TAB 3: ML Prediction ──────────────────────────────────────
+with tab3:
+    st.markdown("#### 🤖 Machine Learning Price Direction Predictor")
+    st.caption("Trained on RSI, MACD, ATR, SMA, Bollinger Band features using Random Forest (80/20 time-series split)")
 
-        st.download_button(
-            "Download backtest signals",
-            data=backtest.signals.to_csv().encode("utf-8"),
-            file_name=f"{config['symbol'].lower()}_signals.csv",
-            mime="text/csv",
-        )
-        st.dataframe(backtest.signals.tail(25), use_container_width=True)
+    with st.spinner("Training model on historical data..."):
+        signal, prob, acc = ml_predict(df)
 
-    with tabs[3]:
-        st.subheader("ATR Position Plan")
-        plan = position_plan.as_dict()
-        risk_table = pd.DataFrame(
-            [
-                {"Item": "Entry price", "Value": f"${plan['entry_price']:,.2f}"},
-                {"Item": "Stop price", "Value": f"${plan['stop_price']:,.2f}"},
-                {"Item": "Shares", "Value": f"{plan['shares']:,}"},
-                {"Item": "Exposure", "Value": f"${plan['exposure']:,.2f}"},
-                {"Item": "Exposure percent", "Value": pct(plan["exposure_pct"])},
-                {"Item": "Planned risk", "Value": f"${plan['planned_risk']:,.2f}"},
-                {"Item": "Planned risk percent", "Value": pct(plan["planned_risk_pct"])},
-            ]
-        )
-        st.dataframe(risk_table, hide_index=True, use_container_width=True)
+    col_s1, col_s2, col_s3 = st.columns(3)
 
-        st.subheader("Guardrails")
-        st.write(
-            "- Keep position size capped when ATR widens.\n"
-            "- Recheck the model after major market regime changes.\n"
-            "- Treat high probability as a signal filter, not a guarantee.\n"
-            "- Include broker fees, taxes, spread, and slippage before live use.\n"
-            "- Use paper trading before connecting any real execution system."
-        )
+    css_class = "buy" if "BUY" in signal else ("sell" if "SELL" in signal else "hold")
+    col_s1.markdown(f'<div class="signal-box {css_class}">Signal<br>{signal}</div>', unsafe_allow_html=True)
+    col_s2.metric("Buy Probability", f"{prob}%",
+                  "↑ Strong signal" if prob >= 60 else ("↓ Weak signal" if prob <= 40 else "Neutral"))
+    col_s3.metric("Model Accuracy", f"{acc}%",
+                  "on out-of-sample test data")
 
-    with tabs[4]:
-        st.subheader("Clean OHLCV Data")
-        st.dataframe(raw_data.tail(200), use_container_width=True)
-        st.subheader("Feature Frame")
-        st.dataframe(feature_frame.tail(200), use_container_width=True)
+    st.markdown("---")
+    st.markdown("#### How this works")
+    col_e1, col_e2, col_e3 = st.columns(3)
+    with col_e1:
+        st.info("**1. Features Used**\nRSI, MACD, MACD Signal, ATR, SMA 20, SMA 50, EMA 20, Bollinger Bands")
+    with col_e2:
+        st.info("**2. Model**\nRandom Forest with 100 trees trained on 80% historical data. Test on remaining 20%.")
+    with col_e3:
+        st.info("**3. Output**\nProbability that tomorrow's close will be HIGHER than today's close.")
 
+    st.warning("⚠️ This is for educational purposes only. Not financial advice. Always do your own research before investing.")
 
-if __name__ == "__main__":
-    main()
+    # Probability Gauge
+    fig_gauge = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=prob,
+        domain={"x": [0, 1], "y": [0, 1]},
+        title={"text": "Buy Probability %", "font": {"color": "#f8fafc"}},
+        gauge={
+            "axis": {"range": [0, 100], "tickcolor": "#64748b"},
+            "bar":  {"color": "#1d4ed8"},
+            "steps": [
+                {"range": [0,  40], "color": "#450a0a"},
+                {"range": [40, 55], "color": "#1c1917"},
+                {"range": [55, 100], "color": "#052e16"},
+            ],
+            "threshold": {"line": {"color": "#f8fafc", "width": 3}, "value": prob},
+        },
+        number={"suffix": "%", "font": {"color": "#f8fafc", "size": 36}},
+    ))
+    fig_gauge.update_layout(paper_bgcolor="#0f172a", font_color="#f8fafc", height=300)
+    st.plotly_chart(fig_gauge, use_container_width=True)
 
+# ── TAB 4: Raw Data ───────────────────────────────────────────
+with tab4:
+    st.markdown(f"#### {stock_name} — Last 100 Trading Days")
+    display_df = df.tail(100).copy()
+    display_df.index = display_df.index.strftime("%Y-%m-%d")
+    display_df["Daily Change %"] = ((display_df["Close"] - display_df["Open"]) / display_df["Open"] * 100).round(2)
+    display_df = display_df.round(2)
+    st.dataframe(display_df[::-1], use_container_width=True)
+
+    csv = display_df.to_csv().encode("utf-8")
+    st.download_button("⬇️ Download CSV", csv,
+                       file_name=f"{stock_name.replace(' ', '_')}_data.csv",
+                       mime="text/csv")
+
+# ── Footer ────────────────────────────────────────────────────
+st.markdown("---")
+st.markdown(
+    '<div style="text-align:center; color:#475569; font-size:0.82rem;">'
+    'Built by <b style="color:#60a5fa">Anand Tembare</b> &nbsp;|&nbsp; '
+    'Data Science Portfolio Project &nbsp;|&nbsp; Live NSE/BSE Data via Yahoo Finance'
+    '</div>',
+    unsafe_allow_html=True,
+)
